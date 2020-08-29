@@ -108,6 +108,7 @@ def process_request(req):
           continue
       
       if type(result) in [dict, ObjectDict]: # if single product
+        print(result)
         parse_and_save_result(req, operation_name, result, asin_list, jan_list)
       elif type(result) == list: # if multiple products
         for re in result:
