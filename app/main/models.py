@@ -635,7 +635,7 @@ class Product(models.Model):
       ("出版社・メーカー", self.Publisher),
       ("型番", self.PartNumber),
       ("ランキング", self.SalesRankings),
-      ("カテゴリ", self.Binding),
+      ("カテゴリ", self.ProductGroup),
       ("リリース", self.ReleaseDate),
       ("定価", self.ListPrice[0]),
       ("定価通貨", self.ListPrice[1]),
