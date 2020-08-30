@@ -17,30 +17,10 @@ def chunks(lst, n):
 
 def save_to_db(req, operation_name, data, asin, jan = None):
   logger.info(f'saving asin {asin} jan {jan}')
-  # if jan:
-  #   Product.objects.filter(jan = jan).delete()
-  if asin and not jan:
-    param = {
-      'user': req.user,
-      'asin': asin,
-    }
-  elif not asin and jan:
-    param = {
-      'user': req.user,
-      'jan': jan,
-    }
-  elif asin and jan:
-    param = {
-      'user': req.user,
-      'asin': asin,
-      'jan': jan
-    }
-  
-  
   try:
-    p = Product.objects.get(**param)
-  except Product.DoesNotExist:
-    p = Product(user = req.user, asin = asin, jan = jan)
+    p = ScrapeRequestResult.objects.get(scrape_request = req, asin = asin, jan = jan)
+  except ScrapeRequestResult.DoesNotExist:
+    p = ScrapeRequestResult(scrape_request = req, asin = asin, jan = jan)
 
   if not 'Error' in data:  
     setattr(p, f'{operation_name}_raw', json.dumps(data))
@@ -82,8 +62,18 @@ def process_request(req):
       products = res['Products']['Product']
 
       if type(products) == list:
-        asin_jan_pairs.extend([(p['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan) for p in products])
-
+        if req.user.asin_jan_one_to_one:
+          print('one to one')
+          no_set = [p for p in products if p['AttributeSets']['ItemAttributes']['Binding']['value'] != 'セット買い']
+          if len(no_set) > 0:
+            asin_jan_pairs.append((no_set[0]['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan))
+          else:
+            ranked = [p for p in products if 'SalesRankings' in p and 'SalesRank' in p['SalesRankings']]
+            s = sorted(ranked, key=lambda p: p['SalesRankings']['SalesRank'][0]['Rank']['value'] if type(p['SalesRankings']['SalesRank']) == list else p['SalesRankings']['SalesRank']['Rank']['value'])
+            if len(s) > 0:
+              asin_jan_pairs.append((s[0]['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan))
+        else:
+          asin_jan_pairs.extend([(p['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan) for p in products])
       elif type(products) in [dict, ObjectDict]:
         asin_jan_pairs.extend([(products['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan)])
       else:
@@ -100,6 +90,8 @@ def process_request(req):
       operation = globals()[operation_name]
       try:
         result = operation(api, req.user.market_place, asin_list)
+        if 'Error' in result:
+          raise Exception(result['Error'])
       except Exception as e:
         sleep(appsettings.quota_wait_sec)
         # retry 
@@ -107,7 +99,7 @@ def process_request(req):
           result = operation(api, req.user.market_place, asin_list)
         except Exception as e:
           logger.error(str(e))
-          continue
+          break
       if type(result) in [dict, ObjectDict]: # if single product
         parse_and_save_result(req, operation_name, result, asin_list, jan_list)
       elif type(result) == list: # if multiple products

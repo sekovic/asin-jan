@@ -145,9 +145,67 @@ class User(AbstractBaseUser, PermissionsMixin):
     if len(s) == 0:
       return None
     return s[0]
+
+@background(schedule=5)
+def async_process_request(request_id):
+  call_command('process_requests', id = request_id)
+
+import re
+def _extract_id(id_type, id_str):
+  if id_type == 'asin':
+    pat = '[A-Z0-9]{10}'
+  elif id_type == 'jan':
+    pat = '[0-9]{13}'
   
-class Product(models.Model):
-  user = models.ForeignKey(to = User, on_delete = models.CASCADE)
+  m = re.match(pat, id_str)
+  return m.group() if m != None else None
+
+class ScrapeRequest(models.Model):
+  user = models.ForeignKey(to = User, on_delete = models.CASCADE, related_name = 'requests')
+  id_type = models.CharField(choices = ID_CHOICES, default = ID_ASIN, max_length = 10)
+  id_text = models.TextField(null = True)
+  csv_file = models.FileField(null = True, upload_to = 'csv')
+  requested_at = models.DateTimeField(auto_now_add = True)
+  status = models.CharField(max_length = 1, default = REQUEST_STATUS_NEW, choices = list(REQUEST_STATUS.items()))
+  error = models.CharField(max_length = 255, null = True, default = None)
+  
+  @property
+  def id_list(self):
+    if self.id_text and self.id_text != '':
+      return self.id_text.split('\r\n')
+    elif self.csv_file != None:
+      with open(self.csv_file.path, mode = 'r', errors='ignore') as f:
+        lines = f.readlines()
+        f.close()
+      trimmed_list = [_extract_id(self.id_type, line) for line in lines if _extract_id(self.id_type, line)]
+   
+      return trimmed_list
+    else:
+      return []
+         
+  @property
+  def id_count(self):
+    return len(self.id_list)
+
+  @property
+  def status_text(self):
+    return REQUEST_STATUS.get(self.status)
+  @property
+  def status_badge_class(self):
+    if self.status == REQUEST_STATUS_NEW:
+      return 'badge-primary'
+    elif self.status  == REQUEST_STATUS_IN_PROGRESS:
+      return 'badge-warning'
+    elif self.status == REQUEST_STATUS_COMPLETED:
+      return 'badge-success'
+    elif self.status == REQUEST_STATUS_ERROR:
+      return 'badge-danger'
+  @property
+  def downloadable(self):
+    return self.status in [REQUEST_STATUS_COMPLETED, REQUEST_STATUS_ERROR]
+
+class ScrapeRequestResult(models.Model):
+  scrape_request = models.ForeignKey(to = ScrapeRequest, on_delete = models.CASCADE, related_name = 'results')
   asin = models.CharField(max_length = 100, null = True, default = None)
   jan = models.CharField(max_length = 13, null = True, default = None)
   get_matching_product_for_id_raw = models.TextField(null = True)
@@ -155,8 +213,6 @@ class Product(models.Model):
   get_lowest_offer_listings_for_asin_raw = models.TextField(null = True)
   get_my_price_for_asin_raw = models.TextField(null = True)
   get_product_categories_for_asin_raw = models.TextField(null = True)
-
-  updated_at = models.DateTimeField(auto_now = True)
 
   @property
   def ItemAttributes(self):
@@ -368,7 +424,7 @@ class Product(models.Model):
   @property
   def Shipping(self):
     data = self.CompetitivePrice
-    if not data:
+    if not data or 'Shipping' not in data['Price']:
       return (None, None)
     data = data['Price']['Shipping']
     return (data["Amount"]["value"], data["CurrencyCode"]["value"])
@@ -480,7 +536,7 @@ class Product(models.Model):
   @property
   def LowestOfferListingNewShipping(self):
     data = self.LowestOfferListingNew
-    if not data:
+    if not data or 'Shipping' not in data:
       return (None, None)
     return (data["Shipping"]["Amount"]["value"], data["Shipping"]["CurrencyCode"]["value"])
   @property
@@ -675,88 +731,6 @@ class Product(models.Model):
   @property
   def csv_column_values(self):
     return [v[1] for v in self.csv_columns]
-  
-@background(schedule=5)
-def async_process_request(request_id):
-  call_command('process_requests', id = request_id)
-
-import re
-def _extract_id(id_type, id_str):
-  if id_type == 'asin':
-    pat = '[A-Z0-9]{10}'
-  elif id_type == 'jan':
-    pat = '[0-9]{13}'
-  
-  m = re.match(pat, id_str)
-  return m.group() if m != None else None
-  
-class ScrapeRequest(models.Model):
-
-  user = models.ForeignKey(to = User, on_delete = models.CASCADE, related_name = 'requests')
-  id_type = models.CharField(choices = ID_CHOICES, default = ID_ASIN, max_length = 10)
-  id_text = models.TextField(null = True)
-  csv_file = models.FileField(null = True, upload_to = 'csv')
-  requested_at = models.DateTimeField(auto_now_add = True)
-  status = models.CharField(max_length = 1, default = REQUEST_STATUS_NEW, choices = list(REQUEST_STATUS.items()))
-  error = models.CharField(max_length = 255, null = True, default = None)
-  
-  @property
-  def id_list(self):
-    if self.id_text and self.id_text != '':
-      return self.id_text.split('\r\n')
-    elif self.csv_file != None:
-      with open(self.csv_file.path, mode = 'r', errors='ignore') as f:
-        lines = f.readlines()
-        f.close()
-      trimmed_list = [_extract_id(self.id_type, line) for line in lines if _extract_id(self.id_type, line)]
-   
-      return trimmed_list
-    else:
-      return []
-  @property
-  def products(self):
-    if self.id_type == ID_ASIN:
-      return Product.objects.filter(user = self.user, asin__in = self.id_list)
-    elif self.id_type == ID_JAN:
-      product_list = []
-      for id in self.id_list:
-        p = Product.objects.filter(user = self.user, jan = id)
-        if p.count() > 1:
-          p = p.filter(asin__isnull = False)
-          if self.user.asin_jan_one_to_one:
-            no_set = [item for item in p if item.Binding != 'セット買い']
-            if len(no_set) > 0:
-              product_list.append(no_set[0])
-            else:
-              top = sorted(p, key=lambda item: item.SalesRankings)[0]
-              product_list.append(top)
-          else:
-            product_list.extend(p)
-        else:
-          product_list.extend(p)
-        
-      return product_list
-      
-  @property
-  def id_count(self):
-    return len(self.id_list)
-
-  @property
-  def status_text(self):
-    return REQUEST_STATUS.get(self.status)
-  @property
-  def status_badge_class(self):
-    if self.status == REQUEST_STATUS_NEW:
-      return 'badge-primary'
-    elif self.status  == REQUEST_STATUS_IN_PROGRESS:
-      return 'badge-warning'
-    elif self.status == REQUEST_STATUS_COMPLETED:
-      return 'badge-success'
-    elif self.status == REQUEST_STATUS_ERROR:
-      return 'badge-danger'
-  @property
-  def downloadable(self):
-    return self.status in [REQUEST_STATUS_COMPLETED, REQUEST_STATUS_ERROR]
 
 class PaypalSubscription(models.Model):
   plan_id = models.CharField(max_length = 100)
