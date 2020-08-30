@@ -723,7 +723,15 @@ class ScrapeRequest(models.Model):
         p = Product.objects.filter(user = self.user, jan = id)
         if p.count() > 1:
           p = p.filter(asin__isnull = False)
-          product_list.extend(p)
+          if self.user.asin_jan_one_to_one:
+            no_set = [item for item in p if item.Binding != 'セット買い']
+            if len(no_set) > 0:
+              product_list.append(no_set[0])
+            else:
+              top = sorted(p, key=lambda item: item.SalesRankings)[0]
+              product_list.append(top)
+          else:
+            product_list.extend(p)
         else:
           product_list.extend(p)
         
