@@ -89,7 +89,7 @@ class User(AbstractBaseUser, PermissionsMixin):
   do_get_lowest_offer_listings_for_asin = models.BooleanField(verbose_name = 'GetLowestOfferListingsForASIN', default = True)
   do_get_my_price_for_asin = models.BooleanField(verbose_name = 'GetMyPricingForASIN', default = False)
   do_get_product_categories_for_asin = models.BooleanField(verbose_name = 'GetProductCategoriesForASIN', default = False)
-  asin_jan_one_to_one = models.BooleanField(default = True, verbose_name = 'JAN検索で最初のASINのみ利用する')
+  asin_jan_one_to_one = models.BooleanField(default = True, verbose_name = 'JAN検索で一つのASINに絞る')
   paid = models.BooleanField(default = True)
 
   is_staff = models.BooleanField(
