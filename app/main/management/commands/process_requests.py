@@ -55,7 +55,7 @@ def process_request(req):
         if 'Error' in res:
           raise Exception(res["Error"]["Message"]["value"])  
       except Exception as e:
-        logger.error(e)
+        logger.error(e, stack_info=True)
         save_to_db(req, None, { 'Error': str(e) }, None, jan = jan)
         continue        
       
@@ -64,7 +64,7 @@ def process_request(req):
       if type(products) == list:
         if req.user.asin_jan_one_to_one:
           print('one to one')
-          no_set = [p for p in products if p['AttributeSets']['ItemAttributes']['Binding']['value'] != 'セット買い']
+          no_set = [p for p in products if 'Binding' in p['AttributeSets']['ItemAttributes'] and p['AttributeSets']['ItemAttributes']['Binding']['value'] != 'セット買い']
           if len(no_set) > 0:
             asin_jan_pairs.append((no_set[0]['Identifiers']['MarketplaceASIN']['ASIN']['value'], jan))
           else:
@@ -98,7 +98,7 @@ def process_request(req):
         try:
           result = operation(api, req.user.market_place, asin_list)
         except Exception as e:
-          logger.error(str(e))
+          logger.error(str(e), stack_info=True)
           break
       if type(result) in [dict, ObjectDict]: # if single product
         parse_and_save_result(req, operation_name, result, asin_list, jan_list)
@@ -121,7 +121,7 @@ class Command(BaseCommand):
       try:
         process_request(req)
       except Exception as e:
-        logger.error(str(e))
+        logger.error(str(e), stack_info=True)
       else:
         logger.info(f'request {req.id} done')
       finally:
