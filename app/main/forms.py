@@ -26,7 +26,7 @@ class RequestTextForm(forms.ModelForm):
     pattern = r'^[A-Z0-9]{10}$' if id_type == 'asin' else r'^[0-9]{13}$' 
     for index, id in enumerate(id_text.split('\r\n')):
       if not re.fullmatch(pattern, id):
-        raise forms.ValidationError(f'{index + 1}個目のIDが不正です。')
+        raise forms.ValidationError(f'{index + 1}個目のIDが不正です。...')
     return data
 class RequestCsvForm(forms.ModelForm):
   class Meta:
@@ -43,6 +43,7 @@ class RequestCsvForm(forms.ModelForm):
     pattern = r'^[A-Z0-9]{10}$' if id_type == 'asin' else r'^[0-9]{13}$' 
     for index, row in enumerate(csv.reader(io_string)):
       id = row[0].replace('\r', '')
+      id = id.strip()
       if not re.fullmatch(pattern, id):
-        raise forms.ValidationError(f'{index + 1}個目のIDが不正です。')
+        raise forms.ValidationError(f'{index + 1}個目のIDが不正です。..')
     return data
